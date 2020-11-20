@@ -69,6 +69,7 @@ public class DefaultServiceDiscoveryBackend implements ServiceDiscoveryBackend {
       if (reg.failed()) {
         resultHandler.handle(failure(reg.cause()));
       } else {
+        System.out.println("Adding zookeeper-id: " + record.getMetadata().getValue("zookeeper-id") + " " + record.getName() + " to registry");
         reg.result().put(uuid, record.toJson().encode(), ar -> {
           if (ar.succeeded()) {
             resultHandler.handle(Future.succeededFuture(record));
@@ -120,8 +121,10 @@ public class DefaultServiceDiscoveryBackend implements ServiceDiscoveryBackend {
                 // Not found
                 resultHandler.handle(Future.failedFuture("Record '" + uuid + "' not found"));
               } else {
+                Record record = new Record(new JsonObject(ar.result()));
+                System.out.println("Removed zookeeper-id: " + record.getMetadata().getValue("zookeeper-id") + " from registry");
                 resultHandler.handle(Future.succeededFuture(
-                  new Record(new JsonObject(ar.result()))));
+                  record));
               }
             } else {
               resultHandler.handle(Future.failedFuture(ar.cause()));
