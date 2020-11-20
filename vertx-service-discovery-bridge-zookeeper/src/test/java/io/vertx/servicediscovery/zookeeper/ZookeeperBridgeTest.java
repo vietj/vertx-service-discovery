@@ -30,6 +30,7 @@ import org.junit.runner.RunWith;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import static com.jayway.awaitility.Awaitility.await;
@@ -112,7 +113,6 @@ public class ZookeeperBridgeTest {
       });
   }
 
-  @Repeat(1)
   @Test
   public void testServiceArrival(TestContext tc) throws Exception {
     Async async = tc.async();
@@ -134,16 +134,12 @@ public class ZookeeperBridgeTest {
 
           vertx.executeBlocking(future -> {
             try {
-              System.out.println("REGISTER");
-              logInstances.run();
               this.discovery.registerService(instance);
               future.complete();
             } catch (Exception e) {
               future.fail(e);
             }
           }, tc.asyncAssertSuccess(v2 -> {
-            System.out.println("END");
-            logInstances.run();
             waitUntil(() -> serviceLookup(sd, 1), tc.asyncAssertSuccess(v3 -> {
               async.complete();
             }));
@@ -152,7 +148,6 @@ public class ZookeeperBridgeTest {
       }));
   }
 
-  @Repeat(1)
   @Test
   public void testArrivalDepartureAndComeBack(TestContext tc) throws Exception {
     Async async = tc.async();
@@ -168,89 +163,71 @@ public class ZookeeperBridgeTest {
     sd.registerServiceImporter(
       new ZookeeperServiceImporter(),
       new JsonObject().put("connection", zkTestServer.getConnectString()),
-      tc.asyncAssertSuccess(k -> {
-        sd.getRecords(x -> true, tc.asyncAssertSuccess(l -> {
-          tc.assertTrue(l.size() == 0);
+      v -> {
+        tc.assertTrue(v.succeeded());
+        sd.getRecords(x -> true, l -> {
+          tc.assertTrue(l.succeeded());
+          tc.assertTrue(l.result().size() == 0);
 
           vertx.executeBlocking(future -> {
             try {
-              System.out.println("UNREGISTER SERVICE");
-              this.discovery.unregisterService(instance);
-              logInstances.run();
               this.discovery.registerService(instance);
-              logInstances.run();
               future.complete();
             } catch (Exception e) {
               future.fail(e);
             }
-          }, tc.asyncAssertSuccess(t -> {
-            waitUntil(() -> serviceLookup(sd, 1), tc.asyncAssertSuccess(a -> {
+          }, ar -> {
+            tc.assertTrue(ar.succeeded());
+            waitUntil(() -> serviceLookup(sd, 1), lookup -> {
+              tc.assertTrue(lookup.succeeded());
+
               // Leave
               vertx.executeBlocking(future2 -> {
                 try {
-                  System.out.println("UNREGISTER SERVICE");
                   this.discovery.unregisterService(instance);
-                  logInstances.run();
                   future2.complete();
                 } catch (Exception e) {
                   future2.fail(e);
                 }
-              }, tc.asyncAssertSuccess(e -> {
+              }, ar2 -> {
                 waitUntil(() -> serviceLookup(sd, 0), lookup2 -> {
                   tc.assertTrue(lookup2.succeeded());
                   vertx.executeBlocking(future3 -> {
                     try {
-                      System.out.println("REGISTER SERVICE");
                       this.discovery.registerService(instance);
-                      logInstances.run();
                       future3.complete();
-                    } catch (Exception f) {
-                      future3.fail(f);
+                    } catch (Exception e) {
+                      future3.fail(e);
                     }
                   }, ar3 -> {
-                    System.out.println("END");
-                    logInstances.run();
-                    waitUntil(() -> serviceLookup(sd, 1), tc.asyncAssertSuccess(p -> {
+                    waitUntil(() -> serviceLookup(sd, 1), ar4 -> {
+                      tc.assertTrue(ar4.succeeded());
                       async.complete();
-                    }));
+                    });
                   });
                 });
-              }));
-            }));
-          }));
-        }));
-      }));
+              });
+            });
+          });
+        });
+      });
   }
 
   private Future<List<Record>> serviceLookup(io.vertx.servicediscovery.ServiceDiscovery discovery, int expected) {
     Promise<List<Record>> promise = Promise.promise();
-    System.out.println("BEFORE LOOKUP");
-    logInstances.run();
     discovery.getRecords(x -> true, ar -> {
-      System.out.println("AFTER LOOKUP ");
-      logInstances.run();
       if (ar.failed()) {
         NoStackTraceThrowable failure = new NoStackTraceThrowable("service lookup failed: " + ar.cause().getMessage());
         failure.initCause(ar.cause());
         promise.fail(failure);
       } else if (ar.result().size() != expected) {
         promise.fail("service lookup failed: unexpected records " + ar.result() + " != " + expected);
-        System.out.println("FAILED " + promise.future().cause().getMessage());
       } else {
         promise.complete(ar.result());
       }
     });
     return promise.future();
   }
-
-  private final Runnable logInstances = () -> {
-    try {
-      int s = this.discovery.queryForInstances("foo-service").size();
-      System.out.println("NUMBER OF INSTANCES " + s);
-    } catch (Exception e) {
-      e.printStackTrace();
-    }
-  };
 
   // 1 here, import 1, second arrive, both imported
   @Test
@@ -280,21 +257,15 @@ public class ZookeeperBridgeTest {
       new JsonObject().put("connection", zkTestServer.getConnectString()),
       tc.asyncAssertSuccess(v -> {
         waitUntil(() -> serviceLookup(sd, 1), tc.asyncAssertSuccess(list -> {
-          logInstances.run();
           tc.assertEquals(list.get(0).getName(), "foo-service");
           vertx.executeBlocking(promise -> {
             try {
-              System.out.println("Registering instance 2");
-              logInstances.run();
               this.discovery.registerService(instance2);
-              logInstances.run();
               promise.complete();
             } catch (Exception e) {
               promise.fail(e);
             }
           }, tc.asyncAssertSuccess(v2 -> {
-            System.out.println("END");
-            logInstances.run();
             waitUntil(() -> serviceLookup(sd, 2), tc.asyncAssertSuccess(lookup -> {
               tc.assertEquals(lookup.get(0).getName(), "foo-service");
               tc.assertEquals(lookup.get(1).getName(), "foo-service");
@@ -391,21 +362,22 @@ public class ZookeeperBridgeTest {
 
 
   private <T> void waitUntil(Supplier<Future<T>> supplier, Handler<AsyncResult<T>> handler) {
-    execute(0, supplier, handler);
+    AtomicInteger attempt = new AtomicInteger();
+    execute(attempt, supplier, handler);
   }
 
-  private <T> void execute(int counter, Supplier<Future<T>> supplier,
+  private <T> void execute(AtomicInteger counter, Supplier<Future<T>> supplier,
                            Handler<AsyncResult<T>> handler) {
     supplier.get().onComplete(ar -> {
       if (ar.succeeded()) {
         handler.handle(Future.succeededFuture(ar.result()));
       } else {
-        if (counter > 20) {
+        if (counter.incrementAndGet() > 10) {
           Exception failure = new Exception("Max attempt reached", ar.cause());
           handler.handle(Future.failedFuture(failure));
         } else {
           vertx.setTimer(100, l -> {
-            execute(counter + 1, supplier, handler);
+            execute(counter, supplier, handler);
           });
         }
       }

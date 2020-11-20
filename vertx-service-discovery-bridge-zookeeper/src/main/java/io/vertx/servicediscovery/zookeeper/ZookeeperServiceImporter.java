@@ -131,9 +131,7 @@ public class ZookeeperServiceImporter implements ServiceImporter, TreeCacheListe
         .stream()
         .map(reg -> {
           Promise<Void> promise = Promise.promise();
-          Record record = reg.record();
-          System.out.println("UNPUBLISH " + record.getName() + " zookeeper-id: " + record.getMetadata().getValue("zookeeper-id"));
-          publisher.unpublish(record.getRegistration(), v -> {
+          publisher.unpublish(reg.record().getRegistration(), v -> {
             registrations.remove(reg);
             if (v.succeeded()) {
               promise.complete(null);
@@ -148,9 +146,7 @@ public class ZookeeperServiceImporter implements ServiceImporter, TreeCacheListe
         .stream()
         .map(instance -> {
           Promise<Void> promise = Promise.promise();
-          Record record = createRecordForInstance(instance);
-          System.out.println("PUBLISH " + record.getName() + " zookeeper-id: " + record.getMetadata().getValue("zookeeper-id"));
-          publisher.publish(record, v -> {
+          publisher.publish(createRecordForInstance(instance), v -> {
             if (v.succeeded()) {
               registrations.add(new RegistrationHolder<>(v.result(), instance));
               promise.complete(null);
@@ -238,10 +234,7 @@ public class ZookeeperServiceImporter implements ServiceImporter, TreeCacheListe
   public void childEvent(CuratorFramework curatorFramework,
                          TreeCacheEvent treeCacheEvent) throws Exception {
     if (started) {
-      System.out.println("EXEC EVENT " + started + " " + treeCacheEvent);
       compute(null);
-    } else {
-      System.out.println("MISSED EVENT " + started + " " + treeCacheEvent);
     }
   }
 
